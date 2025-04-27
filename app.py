@@ -1,46 +1,86 @@
+
 import streamlit as st
 import numpy as np
-import tempfile
+import cv2
 from tensorflow.keras.models import load_model
-from tensorflow.keras.preprocessing import image
+from PIL import Image
+import tempfile
 
-# Load trained model
-model = load_model('asl_resnet50_model.h5')  # Rename accordingly
+# Load model
+model = load_model('asl_resnet50_model.h5')  # Your trained model
 
-# Define image size (must match your training image size)
+# Image size
 IMG_HEIGHT, IMG_WIDTH = 128, 128
 
-# Class labels (ensure the order matches your training generator class_indices)
+# Class labels
 class_labels = ['O', 'R']
 
-# Streamlit app
+# Streamlit page config
 st.set_page_config(page_title="Waste Classifier", page_icon="♻️", layout="centered")
-
 st.title("♻️ Waste Classification (Organic vs Recyclable)")
 
-uploaded_file = st.file_uploader("Upload an image of waste", type=["jpg", "jpeg", "png"])
+# Mode selection
+mode = st.radio("Choose input method:", ('Upload an Image', 'Use Webcam'))
 
-if uploaded_file is not None:
-    # Display uploaded image
-    st.image(uploaded_file, caption='Uploaded Image', use_column_width=True)
+if mode == 'Upload an Image':
+    uploaded_file = st.file_uploader("Upload an image of waste", type=["jpg", "jpeg", "png"])
 
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-        temp_file.write(uploaded_file.read())
-        temp_file_path = temp_file.name
+    if uploaded_file is not None:
+        st.image(uploaded_file, caption='Uploaded Image', use_column_width=True)
 
-    # Preprocess the image
-    img = image.load_img(temp_file_path, target_size=(IMG_HEIGHT, IMG_WIDTH))
-    img_array = image.img_to_array(img)
-    img_array = img_array / 255.0  # Rescale like during training
-    img_array = np.expand_dims(img_array, axis=0)
+        #temporarily save file
+        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+            temp_file.write(uploaded_file.read())
+            temp_file_path = temp_file.name
 
-    # Predict
-    predictions = model.predict(img_array)
-    predicted_class = class_labels[np.argmax(predictions)]
-    confidence = round(np.max(predictions) * 100, 2)
+        #preprocess image
+        img = Image.open(temp_file_path)
+        img = img.convert('RGB')  # Just in case
+        img = img.resize((IMG_WIDTH, IMG_HEIGHT))
+        img_array = np.array(img) / 255.0
+        img_array = np.expand_dims(img_array, axis=0)
 
-    # Display results
-    st.subheader("Prediction Result")
-    readable_class = "Organic" if predicted_class == "O" else "Recyclable"
-    st.write(f"**Prediction:** {readable_class}")
+        #prediction
+        predictions = model.predict(img_array)
+        predicted_class = class_labels[np.argmax(predictions)]
+        confidence = round(np.max(predictions) * 100, 2)
+
+        #display result
+        st.subheader("Prediction Result")
+        readable_class = "Organic" if predicted_class == "O" else "Recyclable"
+        st.write(f"**Prediction:** {readable_class} ({confidence}%)")
+
+elif mode == 'Use Webcam':
+    run = st.checkbox('Start Webcam')
+
+    FRAME_WINDOW = st.image([])
+
+    camera = cv2.VideoCapture(0)
+
+    while run:
+        ret, frame = camera.read()
+        if not ret:
+            st.error('Failed to grab frame.')
+            break
+
+        #process camera
+        img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img_resized = cv2.resize(img, (IMG_WIDTH, IMG_HEIGHT))
+        img_array = img_resized / 255.0
+        img_array = np.expand_dims(img_array, axis=0)
+
+        #prediction
+        predictions = model.predict(img_array)
+        predicted_class = class_labels[np.argmax(predictions)]
+        confidence = round(np.max(predictions) * 100, 2)
+
+        #Overlay prediction frame
+        label = f"{'Organic' if predicted_class == 'O' else 'Recyclable'} ({confidence}%)"
+        cv2.putText(frame, label, (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+
+        #frame update
+        FRAME_WINDOW.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+
+    camera.release()
+
